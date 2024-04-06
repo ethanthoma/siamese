@@ -11,23 +11,17 @@ __all__ = ["AlexNetV1", "AlexNetV2", "AlexNetV3", "RecurrentAlex"]
 class _BatchNorm2d(nn.BatchNorm2d):
     def __init__(self, num_features, *args, **kwargs):
         super(_BatchNorm2d, self).__init__(
-            num_features, *args, eps=1e-5, momentum=0.1, **kwargs
+            num_features, *args, eps=1e-6, momentum=0.05, **kwargs
         )
 
 
 class _AlexNet(nn.Module):
     def forward(self, x, search=False, reset_hidden=None):
-        assert not torch.isnan(x).any(), "x contains NaNs"
         x = self.conv1(x)
-        assert not torch.isnan(x).any(), "conv1 contains NaNs"
         x = self.conv2(x)
-        assert not torch.isnan(x).any(), "conv2 contains NaNs"
         x = self.conv3(x)
-        assert not torch.isnan(x).any(), "conv3 contains NaNs"
         x = self.conv4(x)
-        assert not torch.isnan(x).any(), "conv4 contains NaNs"
         x = self.conv5(x)
-        assert not torch.isnan(x).any(), "conv5 contains NaNs"
         return x
 
 
@@ -131,7 +125,7 @@ class RecurrentAlex(AlexNetV1):
             nn.ReLU(inplace=True),
         )
 
-        self.last = torch.zeros(1, 3, 239, 239)
+        self.last = torch.zeros(1, 3, 239, 239).to("cuda")
 
     def forward(self, x, search=False, reset_hidden=None):
         if x.dim() != 4:
@@ -140,28 +134,20 @@ class RecurrentAlex(AlexNetV1):
         batch_size = x.size(dim=0)
 
         if search:
-            print("search")
             transformed_images = torch.zeros(batch_size, 256, 20, 20)
 
             for i in range(batch_size):
                 single_image = torch.unsqueeze(x[i], 0)
 
                 if reset_hidden[i]:
-                    print("reset")
-                    self.last = torch.zeros(1, 3, 239, 239)
+                    self.last.zero_
 
                 assert not torch.isnan(self.last).any(), "Last contains NaNs"
 
-                single_image = single_image
+                single_image = single_image + self.last
                 single_image = torch.clamp(single_image, min=0, max=255)
 
                 assert not torch.isnan(single_image).any(), "single_image contains NaNs"
-
-                if single_image.dim() == 3:
-                    print("Wrong dims")
-                    print(single_image.dim())
-                    single_image = torch.unsqueeze(single_image, 0)
-                    print(single_image.dim())
 
                 single_image = super().forward(single_image)
 

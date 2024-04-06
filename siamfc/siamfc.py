@@ -9,7 +9,7 @@ import cv2
 import os
 import sys
 from collections import namedtuple
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import DataLoader
 from got10k.trackers import Tracker
 
@@ -79,7 +79,7 @@ class TrackerSiamFC(Tracker):
         gamma = np.power(
             self.cfg.ultimate_lr / self.cfg.initial_lr, 1.0 / self.cfg.epoch_num
         )
-        self.lr_scheduler = ReduceLROnPlateau(optimizer=self.optimizer, mode="min")
+        self.lr_scheduler = ExponentialLR(self.optimizer, gamma)
 
     def parse_args(self, **kwargs):
         # default parameters
@@ -102,8 +102,8 @@ class TrackerSiamFC(Tracker):
             "epoch_num": 50,
             "batch_size": 8,
             "num_workers": 10,
-            "initial_lr": 1e-5,
-            "ultimate_lr": 1e-7,
+            "initial_lr": 1e-2,
+            "ultimate_lr": 1e-5,
             "weight_decay": 5e-4,
             "momentum": 0.9,
             "r_pos": 16,
@@ -269,8 +269,6 @@ class TrackerSiamFC(Tracker):
         # set network mode
         self.net.train(backward)
 
-        print("Loading batch")
-
         batch = data[0]
         reset_hidden = data[1]
 
@@ -331,11 +329,8 @@ class TrackerSiamFC(Tracker):
 
         # loop over epochs
         for epoch in range(self.cfg.epoch_num):
-            print("Starting Epoch: {}".format(epoch + 1))
-            sys.stdout.flush()
             # loop over dataloader
             for it, data in enumerate(dataloader):
-                print("Fetching data...")
                 loss = self.train_step(data, backward=True)
                 print(
                     "Epoch: {} [{}/{}] Loss: {:.5f}".format(
@@ -344,9 +339,6 @@ class TrackerSiamFC(Tracker):
                 )
                 sys.stdout.flush()
 
-            print("Epoch {} done.".format(epoch + 1))
-            sys.stdout.flush()
-
             # save checkpoint
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
@@ -354,7 +346,7 @@ class TrackerSiamFC(Tracker):
             torch.save(self.net.state_dict(), net_path)
 
             # update lr at each epoch
-            self.lr_scheduler.step(loss)
+            self.lr_scheduler.step()
 
     def _create_labels(self, size):
         # skip if same sized labels already created

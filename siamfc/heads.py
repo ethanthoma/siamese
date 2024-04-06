@@ -20,6 +20,6 @@ class SiamFC(nn.Module):
         nz = z.size(0)
         nx, c, h, w = x.size()
         x = x.reshape(-1, nz * c, h, w)
-        out = F.conv2d(x, z, groups=nz)
+        out = F.conv2d(x.to("cuda"), z.to("cuda"), groups=nz)
         out = out.view(nx, -1, out.size(-2), out.size(-1))
         return out
