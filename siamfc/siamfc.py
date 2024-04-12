@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from got10k.trackers import Tracker
 
 from . import ops
-from .backbones import RecurrentAlex
+from .backbones import AlexNetV1
 from .heads import SiamFC
 from .losses import BalancedLoss
 
@@ -26,20 +26,23 @@ __all__ = ["TrackerSiamFC"]
 
 class Net(nn.Module):
     def __init__(self, backbone, head):
+        print("initing net...")
         super(Net, self).__init__()
         self.backbone = backbone
         self.head = head
+        print("inited net.")
 
     def forward(self, z, x, reset_hidden=None):
-        z = self.backbone(z)
-        x = self.backbone(x, search=True, reset_hidden=reset_hidden)
+        z = self.backbone(z, search=True)
+        x = self.backbone(x, search=False, reset_hidden=reset_hidden)
         assert not torch.isnan(z).any(), "Z output contains NaNs"
         assert not torch.isnan(x).any(), "X output contains NaNs"
         return self.head(z, x)
 
 
 class TrackerSiamFC(Tracker):
-    def __init__(self, net_path=None, **kwargs):
+    def __init__(self, net_path=None, model=AlexNetV1, **kwargs):
+        print("initing tracker...")
         super(TrackerSiamFC, self).__init__("SiamFC", True)
         self.cfg = self.parse_args(**kwargs)
 
@@ -50,7 +53,7 @@ class TrackerSiamFC(Tracker):
         # setup model
         print("setup model")
         self.net = Net(
-            backbone=RecurrentAlex(),
+            backbone=model(),
             head=SiamFC(self.cfg.out_scale),
         )
         ops.init_weights(self.net)
@@ -81,6 +84,8 @@ class TrackerSiamFC(Tracker):
         )
         self.lr_scheduler = ExponentialLR(self.optimizer, gamma)
 
+        print("init tracker.")
+
     def parse_args(self, **kwargs):
         # default parameters
         cfg = {
@@ -101,7 +106,7 @@ class TrackerSiamFC(Tracker):
             # train parameters
             "epoch_num": 50,
             "batch_size": 8,
-            "num_workers": 10,
+            "num_workers": 20,
             "initial_lr": 1e-2,
             "ultimate_lr": 1e-5,
             "weight_decay": 5e-4,
@@ -161,7 +166,8 @@ class TrackerSiamFC(Tracker):
 
         # exemplar features
         z = torch.from_numpy(z).to(self.device).permute(2, 0, 1).unsqueeze(0).float()
-        self.kernel = self.net.backbone(z)
+
+        self.kernel = self.net.backbone(z, search=True, reset_hidden=[True])
 
     @torch.no_grad()
     def update(self, img):
@@ -183,7 +189,7 @@ class TrackerSiamFC(Tracker):
         x = torch.from_numpy(x).to(self.device).permute(0, 3, 1, 2).float()
 
         # responses
-        x = self.net.backbone(x)
+        x = self.net.backbone(x, search=False)
         responses = self.net.head(self.kernel, x)
         responses = responses.squeeze(1).cpu().numpy()
 
@@ -300,7 +306,7 @@ class TrackerSiamFC(Tracker):
         return loss.item()
 
     @torch.enable_grad()
-    def train_over(self, seqs, val_seqs=None, save_dir="pretrained/v2/recurrent"):
+    def train_over(self, seqs, val_seqs=None, save_dir="pretrained/v7/recurrent"):
         # set to train mode
         self.net.train()
 

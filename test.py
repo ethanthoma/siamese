@@ -1,16 +1,17 @@
 from __future__ import absolute_import
 
 import os
-from got10k.experiments import *
+from got10k.experiments import ExperimentGOT10k
 
 from siamfc import TrackerSiamFC
+from siamfc import RecurrentAlexMul
 
 
 if __name__ == "__main__":
-    net_path = "./pretrained/v2/recurrent/siamfc_alexnet_e50.pth"
-    tracker = TrackerSiamFC(net_path=net_path)
+    net_path = "./pretrained/v7/recurrent/siamfc_alexnet_e10.pth"
+    tracker = TrackerSiamFC(net_path=net_path, model=RecurrentAlexMul)
 
-    root_dir = os.path.expanduser("./data/VOT2018/")
-    e = ExperimentVOT(root_dir, version=2018)
+    root_dir = os.environ.get("DATASET_PATH", "./data/VOT2018/")
+    e = ExperimentGOT10k(root_dir, subset="test")
     e.run(tracker)
     e.report([tracker.name])

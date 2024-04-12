@@ -4,11 +4,12 @@ import os
 from got10k.datasets import GOT10k
 
 from siamfc import TrackerSiamFC
+from siamfc import RecurrentAlexMul
 
 
 if __name__ == "__main__":
     root_dir = os.environ.get("DATASET_PATH", "./data/VOT2018/")
     seqs = GOT10k(root_dir, subset="train", return_meta=True)
 
-    tracker = TrackerSiamFC()
+    tracker = TrackerSiamFC(model=RecurrentAlexMul)
     tracker.train_over(seqs)

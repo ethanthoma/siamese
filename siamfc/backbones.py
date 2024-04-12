@@ -5,7 +5,13 @@ import torch
 import torch.nn as nn
 
 
-__all__ = ["AlexNetV1", "AlexNetV2", "AlexNetV3", "RecurrentAlex"]
+__all__ = [
+    "AlexNetV1",
+    "AlexNetV2",
+    "AlexNetV3",
+    "RecurrentAlexAdd",
+    "RecurrentAlexMul",
+]
 
 
 class _BatchNorm2d(nn.BatchNorm2d):
@@ -107,11 +113,17 @@ class AlexNetV3(_AlexNet):
         self.conv5 = nn.Sequential(nn.Conv2d(768, 512, 3, 1), _BatchNorm2d(512))
 
 
-class RecurrentAlex(AlexNetV1):
+class RecurrentAlexAdd(AlexNetV1):
     def __init__(self):
         print("init")
 
-        super(RecurrentAlex, self).__init__()
+        super().__init__()
+
+        self.conv5 = nn.Sequential(
+            nn.Sequential(nn.Conv2d(384, 256, 3, 1, groups=2)),
+            _BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+        )
 
         self.transform = nn.Sequential(
             nn.ConvTranspose2d(
@@ -128,26 +140,22 @@ class RecurrentAlex(AlexNetV1):
         self.last = torch.zeros(1, 3, 239, 239).to("cuda")
 
     def forward(self, x, search=False, reset_hidden=None):
-        if x.dim() != 4:
-            x = torch.unsqueeze(x, 0)
+        if not search:
+            batch_size = x.size(dim=0)
 
-        batch_size = x.size(dim=0)
-
-        if search:
             transformed_images = torch.zeros(batch_size, 256, 20, 20)
 
             for i in range(batch_size):
                 single_image = torch.unsqueeze(x[i], 0)
 
-                if reset_hidden[i]:
-                    self.last.zero_
-
-                assert not torch.isnan(self.last).any(), "Last contains NaNs"
-
-                single_image = single_image + self.last
-                single_image = torch.clamp(single_image, min=0, max=255)
-
-                assert not torch.isnan(single_image).any(), "single_image contains NaNs"
+                if reset_hidden is not None and reset_hidden[i]:
+                    self.last.zero_()
+                else:
+                    assert not torch.isnan(self.last).any(), "Last contains NaNs"
+                    single_image = single_image + self.last
+                    assert not torch.isnan(
+                        single_image
+                    ).any(), "single_image contains NaNs"
 
                 single_image = super().forward(single_image)
 
@@ -161,6 +169,117 @@ class RecurrentAlex(AlexNetV1):
 
             x = transformed_images
         else:
-            x = super(RecurrentAlex, self).forward(x)
+            if reset_hidden is not None:
+                self.last.zero_()
+            x = super().forward(x)
 
         return x
+
+    def reset_hidden(self):
+        self.last.zero_()
+
+
+class RecurrentAlexMul(AlexNetV1):
+    def __init__(self):
+        print("init")
+
+        super().__init__()
+
+        self.deconv = nn.Sequential(
+            nn.ConvTranspose2d(
+                in_channels=256,
+                out_channels=384,
+                kernel_size=3,
+                stride=1,
+                groups=2,
+            ),
+            _BatchNorm2d(384),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(
+                in_channels=384,
+                out_channels=384,
+                kernel_size=3,
+                stride=1,
+                groups=2,
+            ),
+            _BatchNorm2d(384),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(
+                in_channels=384,
+                out_channels=256,
+                kernel_size=3,
+                stride=1,
+            ),
+            _BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=(2), mode="bilinear", align_corners=True),
+            nn.ConvTranspose2d(
+                in_channels=256,
+                out_channels=96,
+                kernel_size=5,
+                stride=1,
+                groups=2,
+            ),
+            _BatchNorm2d(96),
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=(2), mode="bilinear", align_corners=True),
+            nn.ConvTranspose2d(
+                in_channels=96,
+                out_channels=3,
+                kernel_size=11,
+                stride=2,
+            ),
+            _BatchNorm2d(3),
+            nn.Sigmoid(),
+        )
+
+        self.last = None
+
+    def forward(self, x, search=False, reset_hidden=None):
+        if not search:
+            if x.dim() == 3:
+                x = torch.unsqueeze(x, 0)
+
+            batch_size = x.size(dim=0)
+
+            if self.last is None:
+                self.last = torch.ones(1, *x.shape[1:]).to(
+                    x.get_device() if x.get_device() != -1 else "CPU"
+                )
+
+            transformed_images = []
+
+            for i in range(batch_size):
+                single_image = torch.unsqueeze(x[i], 0)
+
+                if reset_hidden is not None and reset_hidden[i]:
+                    self.last.fill_(1)
+                else:
+                    assert not torch.isnan(self.last).any(), "Last contains NaNs"
+                    single_image = torch.mul(single_image, self.last)
+                    assert not torch.isnan(
+                        single_image
+                    ).any(), "single_image contains NaNs"
+
+                single_image = super().forward(single_image)
+
+                assert not torch.isnan(single_image).any(), "Forward contains NaNs"
+
+                self.last = nn.functional.interpolate(
+                    self.deconv(single_image).detach(), size=list(x.shape[2:])
+                )
+
+                assert not torch.isnan(single_image).any(), "self.last contains NaNs"
+
+                transformed_images.append(torch.squeeze(single_image, 0))
+
+            x = torch.stack(transformed_images)
+        else:
+            if self.last is not None and reset_hidden is not None:
+                self.last.fill_(1)
+            x = super().forward(x)
+
+        return x
+
+    def reset_hidden(self):
+        self.last.fill_(1)
